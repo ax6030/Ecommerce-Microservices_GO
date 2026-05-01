@@ -14,8 +14,10 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/jmoiron/sqlx"
 	pb "github.com/jason/ecommerce/proto/product"
+	"github.com/jason/ecommerce/product-service/internal/cache"
 	"github.com/jason/ecommerce/product-service/internal/handler"
 	"github.com/jason/ecommerce/product-service/internal/repository"
+	"github.com/jason/ecommerce/product-service/internal/service"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 )
@@ -26,6 +28,11 @@ func main() {
 	dsn := os.Getenv("PRODUCT_DB_DSN")
 	if dsn == "" {
 		dsn = "user:password@tcp(localhost:3306)/productdb?parseTime=true"
+	}
+
+	redisAddr := os.Getenv("REDIS_ADDR")
+	if redisAddr == "" {
+		redisAddr = "localhost:6379"
 	}
 
 	db, err := sqlx.Open("mysql", dsn)
@@ -41,7 +48,9 @@ func main() {
 	}
 
 	repo := repository.NewProductRepository(db)
-	grpcHandler := handler.NewProductGRPCHandler(repo)
+	productCache := cache.NewProductCache(redisAddr)
+	svc := service.NewProductService(repo, productCache, logger)
+	grpcHandler := handler.NewProductGRPCHandler(svc)
 
 	go func() {
 		http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -67,7 +76,7 @@ func main() {
 	pb.RegisterProductServiceServer(server, grpcHandler)
 	reflection.Register(server)
 
-	logger.Info("gRPC server listening", "port", grpcPort)
+	logger.Info("gRPC server listening", "port", grpcPort, "redis", redisAddr)
 	if err := server.Serve(lis); err != nil {
 		logger.Error("server error", "error", err)
 		os.Exit(1)

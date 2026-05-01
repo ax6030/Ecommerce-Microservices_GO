@@ -13,10 +13,10 @@ import (
 	migratemysql "github.com/golang-migrate/migrate/v4/database/mysql"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/jmoiron/sqlx"
-	"github.com/nats-io/nats.go"
 	pb_order "github.com/jason/ecommerce/proto/order"
 	pb_product "github.com/jason/ecommerce/proto/product"
 	"github.com/jason/ecommerce/order-service/internal/handler"
+	"github.com/jason/ecommerce/order-service/internal/messaging"
 	"github.com/jason/ecommerce/order-service/internal/repository"
 	"github.com/jason/ecommerce/order-service/internal/service"
 	"google.golang.org/grpc"
@@ -32,6 +32,11 @@ func main() {
 		dsn = "user:password@tcp(localhost:3306)/orderdb?parseTime=true"
 	}
 
+	rabbitmqURL := os.Getenv("RABBITMQ_URL")
+	if rabbitmqURL == "" {
+		rabbitmqURL = "amqp://guest:guest@localhost:5672/"
+	}
+
 	db, err := sqlx.Open("mysql", dsn)
 	if err != nil {
 		logger.Error("failed to open db", "error", err)
@@ -44,16 +49,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	natsURL := os.Getenv("NATS_URL")
-	if natsURL == "" {
-		natsURL = nats.DefaultURL
-	}
-	nc, err := nats.Connect(natsURL)
+	publisher, err := messaging.NewPublisher(rabbitmqURL)
 	if err != nil {
-		logger.Error("failed to connect to NATS", "error", err)
+		logger.Error("failed to connect to RabbitMQ", "error", err)
 		os.Exit(1)
 	}
-	defer nc.Close()
+	defer publisher.Close()
+	logger.Info("connected to RabbitMQ", "url", rabbitmqURL)
 
 	productAddr := os.Getenv("PRODUCT_SERVICE_ADDR")
 	if productAddr == "" {
@@ -67,7 +69,7 @@ func main() {
 	defer productConn.Close()
 
 	repo := repository.NewOrderRepository(db)
-	svc := service.NewOrderService(repo, pb_product.NewProductServiceClient(productConn), nc)
+	svc := service.NewOrderService(repo, pb_product.NewProductServiceClient(productConn), publisher)
 	grpcHandler := handler.NewOrderGRPCHandler(svc)
 
 	go func() {

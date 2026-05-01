@@ -2,13 +2,12 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
 
-	"github.com/nats-io/nats.go"
 	pb_product "github.com/jason/ecommerce/proto/product"
+	"github.com/jason/ecommerce/order-service/internal/messaging"
 	"github.com/jason/ecommerce/order-service/internal/model"
 	"github.com/jason/ecommerce/order-service/internal/repository"
 )
@@ -16,19 +15,19 @@ import (
 type OrderService struct {
 	repo        *repository.OrderRepository
 	productConn pb_product.ProductServiceClient
-	nc          *nats.Conn
+	publisher   *messaging.Publisher
 	logger      *slog.Logger
 }
 
 func NewOrderService(
 	repo *repository.OrderRepository,
 	productConn pb_product.ProductServiceClient,
-	nc *nats.Conn,
+	publisher *messaging.Publisher,
 ) *OrderService {
 	return &OrderService{
 		repo:        repo,
 		productConn: productConn,
-		nc:          nc,
+		publisher:   publisher,
 		logger:      slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", "order-service"),
 	}
 }
@@ -80,7 +79,7 @@ func (s *OrderService) CreateOrder(ctx context.Context, input CreateOrderInput) 
 		return nil, fmt.Errorf("failed to create order: %w", err)
 	}
 
-	s.publishOrderCreated(order)
+	s.publishOrderCreated(ctx, order)
 	return order, nil
 }
 
@@ -99,20 +98,15 @@ func (s *OrderService) ListOrders(ctx context.Context, userID string, page, limi
 	return s.repo.ListByUserID(ctx, userID, limit, offset)
 }
 
-func (s *OrderService) publishOrderCreated(order *model.Order) {
+func (s *OrderService) publishOrderCreated(ctx context.Context, order *model.Order) {
 	event := model.OrderCreatedEvent{
 		OrderID:     order.ID,
 		UserID:      order.UserID,
 		TotalAmount: order.TotalAmount,
 		Items:       order.Items,
 	}
-	data, err := json.Marshal(event)
-	if err != nil {
-		s.logger.Error("failed to marshal order event", "error", err)
-		return
-	}
-	if err := s.nc.Publish("order.created", data); err != nil {
-		s.logger.Error("failed to publish order.created event", "error", err)
+	if err := s.publisher.Publish(ctx, "order.created", event); err != nil {
+		s.logger.Error("failed to publish order.created event", "error", err, "order_id", order.ID)
 		return
 	}
 	s.logger.Info("published order.created event", "order_id", order.ID)

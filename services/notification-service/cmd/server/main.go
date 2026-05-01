@@ -7,32 +7,32 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/nats-io/nats.go"
+	"github.com/jason/ecommerce/notification-service/internal/messaging"
 	"github.com/jason/ecommerce/notification-service/internal/service"
 )
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", "notification-service")
 
-	natsURL := os.Getenv("NATS_URL")
-	if natsURL == "" {
-		natsURL = nats.DefaultURL
+	rabbitmqURL := os.Getenv("RABBITMQ_URL")
+	if rabbitmqURL == "" {
+		rabbitmqURL = "amqp://guest:guest@localhost:5672/"
 	}
 
-	nc, err := nats.Connect(natsURL)
+	consumer, err := messaging.NewConsumer(rabbitmqURL)
 	if err != nil {
-		logger.Error("failed to connect to NATS", "error", err)
+		logger.Error("failed to connect to RabbitMQ", "error", err)
 		os.Exit(1)
 	}
-	defer nc.Close()
-	logger.Info("connected to NATS", "url", natsURL)
+	defer consumer.Close()
+	logger.Info("connected to RabbitMQ", "url", rabbitmqURL)
 
-	svc := service.NewNotificationService(nc)
+	svc := service.NewNotificationService(consumer)
 	if err := svc.Subscribe(); err != nil {
 		logger.Error("failed to subscribe", "error", err)
 		os.Exit(1)
 	}
-	logger.Info("subscribed to order.created events")
+	logger.Info("subscribed to order.created queue")
 
 	go func() {
 		http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
