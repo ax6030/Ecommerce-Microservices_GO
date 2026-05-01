@@ -1,0 +1,151 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  user-db:
+    image: mariadb:11
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: userdb
+      MYSQL_USER: user
+      MYSQL_PASSWORD: password
+    volumes:
+      - user_db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  product-db:
+    image: mariadb:11
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: productdb
+      MYSQL_USER: user
+      MYSQL_PASSWORD: password
+    volumes:
+      - product_db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  order-db:
+    image: mariadb:11
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: orderdb
+      MYSQL_USER: user
+      MYSQL_PASSWORD: password
+    volumes:
+      - order_db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  user-service:
+    image: ${IMAGE_PREFIX:-ghcr.io/ax6030/ecommerce}-user-service:${IMAGE_TAG:-develop}
+    environment:
+      USER_DB_DSN: user:password@tcp(user-db:3306)/userdb?parseTime=true
+      JWT_SECRET: ${JWT_SECRET:-super-secret-jwt-key-change-in-production}
+      GRPC_PORT: "50051"
+    depends_on:
+      user-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8081/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  product-service:
+    image: ${IMAGE_PREFIX:-ghcr.io/ax6030/ecommerce}-product-service:${IMAGE_TAG:-develop}
+    environment:
+      PRODUCT_DB_DSN: user:password@tcp(product-db:3306)/productdb?parseTime=true
+      REDIS_ADDR: redis:6379
+      GRPC_PORT: "50052"
+    depends_on:
+      product-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8082/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  order-service:
+    image: ${IMAGE_PREFIX:-ghcr.io/ax6030/ecommerce}-order-service:${IMAGE_TAG:-develop}
+    environment:
+      ORDER_DB_DSN: user:password@tcp(order-db:3306)/orderdb?parseTime=true
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      PRODUCT_SERVICE_ADDR: product-service:50052
+      GRPC_PORT: "50053"
+    depends_on:
+      order-db:
+        condition: service_healthy
+      product-service:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8083/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  notification-service:
+    image: ${IMAGE_PREFIX:-ghcr.io/ax6030/ecommerce}-notification-service:${IMAGE_TAG:-develop}
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  api-gateway:
+    image: ${IMAGE_PREFIX:-ghcr.io/ax6030/ecommerce}-api-gateway:${IMAGE_TAG:-develop}
+    ports:
+      - "8080:8080"
+    environment:
+      USER_SERVICE_ADDR: user-service:50051
+      PRODUCT_SERVICE_ADDR: product-service:50052
+      ORDER_SERVICE_ADDR: order-service:50053
+      HTTP_PORT: "8080"
+    depends_on:
+      user-service:
+        condition: service_healthy
+      product-service:
+        condition: service_healthy
+      order-service:
+        condition: service_healthy
+
+volumes:
+  user_db_data:
+  product_db_data:
+  order_db_data:

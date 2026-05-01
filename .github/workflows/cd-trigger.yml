@@ -1,0 +1,20 @@
+name: CD Trigger
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [develop]
+
+jobs:
+  notify-jenkins:
+    name: Trigger Jenkins Deploy
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - name: Trigger Jenkins pipeline
+        run: |
+          curl -s -o /dev/null -w "%{http_code}" \
+            -X POST "${{ secrets.JENKINS_URL }}/job/ecommerce-deploy/build" \
+            --user "${{ secrets.JENKINS_USER }}:${{ secrets.JENKINS_TOKEN }}" \
+            --data-urlencode "json={\"parameter\":[{\"name\":\"IMAGE_TAG\",\"value\":\"sha-${{ github.event.workflow_run.head_sha }}\"}]}"
