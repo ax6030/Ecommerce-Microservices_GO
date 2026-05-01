@@ -1,16 +1,18 @@
 services:
   # ── Message Bus ──────────────────────────────────────────────
-  nats:
-    image: nats:2.10-alpine
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
     ports:
-      - "4222:4222"
-      - "8222:8222"
-    command: ["--http_port", "8222"]
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8222/healthz"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   # ── Cache ────────────────────────────────────────────────────
   redis:
@@ -112,7 +114,7 @@ services:
       dockerfile: services/order-service/Dockerfile
     environment:
       ORDER_DB_DSN: user:password@tcp(order-db:3306)/orderdb?parseTime=true
-      NATS_URL: nats://nats:4222
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
       PRODUCT_SERVICE_ADDR: product-service:50052
       GRPC_PORT: "50053"
     depends_on:
@@ -120,7 +122,7 @@ services:
         condition: service_healthy
       product-service:
         condition: service_healthy
-      nats:
+      rabbitmq:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8083/healthz"]
@@ -133,9 +135,9 @@ services:
       context: .
       dockerfile: services/notification-service/Dockerfile
     environment:
-      NATS_URL: nats://nats:4222
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
     depends_on:
-      nats:
+      rabbitmq:
         condition: service_healthy
 
   api-gateway:

@@ -6,32 +6,43 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/nats-io/nats.go"
+	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/jason/ecommerce/notification-service/internal/model"
+	"github.com/jason/ecommerce/notification-service/internal/messaging"
 )
 
 type NotificationService struct {
-	nc     *nats.Conn
-	logger *slog.Logger
+	consumer *messaging.Consumer
+	logger   *slog.Logger
 }
 
-func NewNotificationService(nc *nats.Conn) *NotificationService {
+func NewNotificationService(consumer *messaging.Consumer) *NotificationService {
 	return &NotificationService{
-		nc:     nc,
-		logger: slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", "notification-service"),
+		consumer: consumer,
+		logger:   slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", "notification-service"),
 	}
 }
 
 func (s *NotificationService) Subscribe() error {
-	_, err := s.nc.Subscribe("order.created", func(msg *nats.Msg) {
+	deliveries, err := s.consumer.Consume()
+	if err != nil {
+		return err
+	}
+	go s.processDeliveries(deliveries)
+	return nil
+}
+
+func (s *NotificationService) processDeliveries(deliveries <-chan amqp.Delivery) {
+	for d := range deliveries {
 		var event model.OrderCreatedEvent
-		if err := json.Unmarshal(msg.Data, &event); err != nil {
+		if err := json.Unmarshal(d.Body, &event); err != nil {
 			s.logger.Error("failed to unmarshal order.created event", "error", err)
-			return
+			d.Nack(false, false)
+			continue
 		}
 		s.handleOrderCreated(event)
-	})
-	return err
+		d.Ack(false)
+	}
 }
 
 func (s *NotificationService) handleOrderCreated(event model.OrderCreatedEvent) {
