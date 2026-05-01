@@ -1,0 +1,149 @@
+services:
+  # ── Message Bus ──────────────────────────────────────────────
+  nats:
+    image: nats:2.10-alpine
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    command: ["--http_port", "8222"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── Databases ────────────────────────────────────────────────
+  user-db:
+    image: mariadb:11
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: userdb
+      MYSQL_USER: user
+      MYSQL_PASSWORD: password
+    volumes:
+      - user_db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  product-db:
+    image: mariadb:11
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: productdb
+      MYSQL_USER: user
+      MYSQL_PASSWORD: password
+    volumes:
+      - product_db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  order-db:
+    image: mariadb:11
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: orderdb
+      MYSQL_USER: user
+      MYSQL_PASSWORD: password
+    volumes:
+      - order_db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ── Microservices ────────────────────────────────────────────
+  user-service:
+    build:
+      context: .
+      dockerfile: services/user-service/Dockerfile
+    environment:
+      USER_DB_DSN: user:password@tcp(user-db:3306)/userdb?parseTime=true
+      JWT_SECRET: ${JWT_SECRET:-super-secret-jwt-key-change-in-production}
+      GRPC_PORT: "50051"
+    depends_on:
+      user-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8081/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  product-service:
+    build:
+      context: .
+      dockerfile: services/product-service/Dockerfile
+    environment:
+      PRODUCT_DB_DSN: user:password@tcp(product-db:3306)/productdb?parseTime=true
+      GRPC_PORT: "50052"
+    depends_on:
+      product-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8082/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  order-service:
+    build:
+      context: .
+      dockerfile: services/order-service/Dockerfile
+    environment:
+      ORDER_DB_DSN: user:password@tcp(order-db:3306)/orderdb?parseTime=true
+      NATS_URL: nats://nats:4222
+      PRODUCT_SERVICE_ADDR: product-service:50052
+      GRPC_PORT: "50053"
+    depends_on:
+      order-db:
+        condition: service_healthy
+      product-service:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8083/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  notification-service:
+    build:
+      context: .
+      dockerfile: services/notification-service/Dockerfile
+    environment:
+      NATS_URL: nats://nats:4222
+    depends_on:
+      nats:
+        condition: service_healthy
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: services/api-gateway/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      USER_SERVICE_ADDR: user-service:50051
+      PRODUCT_SERVICE_ADDR: product-service:50052
+      ORDER_SERVICE_ADDR: order-service:50053
+      HTTP_PORT: "8080"
+    depends_on:
+      user-service:
+        condition: service_healthy
+      product-service:
+        condition: service_healthy
+      order-service:
+        condition: service_healthy
+
+volumes:
+  user_db_data:
+  product_db_data:
+  order_db_data:

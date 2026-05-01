@@ -1,0 +1,6 @@
+.env
+# *.pb.go  # tracked in repo
+vendor/
+bin/
+*.test
+.DS_Store
