@@ -7,8 +7,3 @@ CREATE TABLE IF NOT EXISTS products (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
-
-INSERT INTO products (id, name, description, price, stock) VALUES
-    ('prod-001', 'Go Programming Book', 'Learn Go programming', 39.99, 100),
-    ('prod-002', 'Docker Deep Dive', 'Master Docker containers', 49.99, 50),
-    ('prod-003', 'Kubernetes in Action', 'K8s for production', 59.99, 75);
