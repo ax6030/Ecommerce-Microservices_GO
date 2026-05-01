@@ -5,22 +5,22 @@ import (
 
 	pb "github.com/jason/ecommerce/proto/product"
 	"github.com/jason/ecommerce/product-service/internal/model"
-	"github.com/jason/ecommerce/product-service/internal/repository"
+	"github.com/jason/ecommerce/product-service/internal/service"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
 type ProductGRPCHandler struct {
 	pb.UnimplementedProductServiceServer
-	repo *repository.ProductRepository
+	svc *service.ProductService
 }
 
-func NewProductGRPCHandler(repo *repository.ProductRepository) *ProductGRPCHandler {
-	return &ProductGRPCHandler{repo: repo}
+func NewProductGRPCHandler(svc *service.ProductService) *ProductGRPCHandler {
+	return &ProductGRPCHandler{svc: svc}
 }
 
 func (h *ProductGRPCHandler) GetProduct(ctx context.Context, req *pb.GetProductRequest) (*pb.GetProductResponse, error) {
-	p, err := h.repo.FindByID(ctx, req.Id)
+	p, err := h.svc.GetProduct(ctx, req.Id)
 	if err != nil {
 		return nil, status.Errorf(codes.NotFound, "product not found")
 	}
@@ -32,12 +32,12 @@ func (h *ProductGRPCHandler) ListProducts(ctx context.Context, req *pb.ListProdu
 	if limit <= 0 {
 		limit = 20
 	}
-	offset := (int(req.Page) - 1) * limit
-	if offset < 0 {
-		offset = 0
+	page := int(req.Page)
+	if page <= 0 {
+		page = 1
 	}
 
-	products, total, err := h.repo.List(ctx, limit, offset)
+	products, total, err := h.svc.ListProducts(ctx, page, limit)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to list products: %v", err)
 	}
@@ -51,7 +51,7 @@ func (h *ProductGRPCHandler) ListProducts(ctx context.Context, req *pb.ListProdu
 }
 
 func (h *ProductGRPCHandler) DeductStock(ctx context.Context, req *pb.DeductStockRequest) (*pb.DeductStockResponse, error) {
-	remaining, err := h.repo.DeductStock(ctx, req.ProductId, req.Quantity)
+	remaining, err := h.svc.DeductStock(ctx, req.ProductId, req.Quantity)
 	if err != nil {
 		return nil, status.Errorf(codes.FailedPrecondition, "%v", err)
 	}
@@ -65,7 +65,7 @@ func (h *ProductGRPCHandler) CreateProduct(ctx context.Context, req *pb.CreatePr
 		Price:       req.Price,
 		Stock:       req.Stock,
 	}
-	if err := h.repo.Create(ctx, p); err != nil {
+	if err := h.svc.CreateProduct(ctx, p); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to create product: %v", err)
 	}
 	return &pb.CreateProductResponse{

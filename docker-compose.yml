@@ -12,6 +12,17 @@ services:
       timeout: 3s
       retries: 5
 
+  # ── Cache ────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   # ── Databases ────────────────────────────────────────────────
   user-db:
     image: mariadb:11
@@ -82,9 +93,12 @@ services:
       dockerfile: services/product-service/Dockerfile
     environment:
       PRODUCT_DB_DSN: user:password@tcp(product-db:3306)/productdb?parseTime=true
+      REDIS_ADDR: redis:6379
       GRPC_PORT: "50052"
     depends_on:
       product-db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8082/healthz"]
